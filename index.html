@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batch Image Resizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #F3F4F1;
+    --card: #FFFFFF;
+    --ink: #16181D;
+    --muted: #4A4F59;
+    --line: #DADDE2;
+    --line-strong: #9AA1AD;
+    --soft: #F7F8F6;
+    --thumb: #D9DEE6;
+    --accent: #1D4ED8;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #EEF3FF;
+    --danger: #B42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317;
+      --card: #1A1D23;
+      --ink: #ECEEF2;
+      --muted: #A3A9B5;
+      --line: #2E333C;
+      --line-strong: #4A515E;
+      --soft: #15181D;
+      --thumb: #262A32;
+      --accent: #6B93FF;
+      --accent-ink: #0B1020;
+      --accent-soft: #1A2440;
+      --danger: #FF8A80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 16px; display: flex; flex-direction: column; gap: 28px; }
+  h1 { margin: 0; font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; }
+  h2 { margin: 0; font-size: 1.125rem; font-weight: 600; }
+  .lede { margin: 6px 0 0; color: var(--muted); }
+
+  .drop {
+    border: 2px dashed var(--line-strong);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 40px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    text-align: center;
+    transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop .big { font-size: 1.125rem; font-weight: 600; }
+  .drop .small { font-size: .9375rem; color: var(--muted); }
+
+  .btn {
+    min-height: 44px; padding: 0 20px; border-radius: 10px;
+    border: 1px solid var(--ink); background: var(--card); color: var(--ink);
+    font: inherit; font-weight: 500; cursor: pointer;
+  }
+  .btn-link { min-height: 44px; padding: 0 12px; border: none; background: none; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; }
+  .btn-primary {
+    min-height: 56px; border: none; border-radius: 12px;
+    background: var(--accent); color: var(--accent-ink);
+    font: inherit; font-size: 1.0625rem; font-weight: 600; cursor: pointer; width: 100%;
+  }
+  .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field > label { font-weight: 600; }
+  select, .num {
+    min-height: 48px; border: 1px solid var(--line-strong); border-radius: 10px;
+    background: var(--card); color: var(--ink); font-size: 1rem;
+  }
+  select { padding: 0 12px; font-family: 'IBM Plex Mono', monospace; }
+  .num { display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+  .num input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--ink); font: 1rem 'IBM Plex Mono', monospace; }
+  .num:focus-within, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .num span { color: var(--muted); font-size: .875rem; }
+  .hint { margin: 0; font-size: .875rem; color: var(--muted); }
+  .dims { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+
+  .check {
+    display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--soft); cursor: pointer;
+  }
+  .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+  .check b { display: block; font-weight: 600; }
+  .check small { color: var(--muted); font-size: .8125rem; }
+
+  .batch-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+  .empty { color: var(--muted); font-size: .9375rem; margin: 0; }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; position: relative; }
+  figure img { display: block; width: 100%; height: 96px; object-fit: cover; background: var(--thumb); }
+  figcaption { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+  figcaption .name { font-size: .8125rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  figcaption .size { font-size: .75rem; color: var(--muted); }
+  .remove {
+    position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 50%;
+    border: none; background: rgba(0,0,0,.6); color: #fff; font-size: 1.1rem; line-height: 1; cursor: pointer;
+  }
+  .status { min-height: 1.4em; margin: 0; text-align: center; color: var(--muted); font-size: .9375rem; }
+  .status.err { color: var(--danger); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header>
+    <h1>Batch Image Resizer</h1>
+    <p class="lede">Resize a whole batch of images in your browser, then download them as one zip. Nothing is uploaded.</p>
+  </header>
+
+  <section class="drop" id="drop" aria-label="Add images">
+    <svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+    <div class="big">Drag and drop images here</div>
+    <div class="small">JPG, PNG or WebP · as many as you like</div>
+    <button type="button" class="btn" id="browse">Browse files</button>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple class="sr">
+  </section>
+
+  <section class="card" aria-label="Resize settings">
+    <h2>Output size</h2>
+
+    <div class="field">
+      <label for="preset">Common sizes</label>
+      <select id="preset">
+        <option value="">Custom</option>
+        <option value="1280x720">1280 × 720</option>
+        <option value="1366x768">1366 × 768</option>
+        <option value="1600x900">1600 × 900</option>
+        <option value="1760x990">1760 × 990</option>
+        <option value="1920x1080" selected>1920 × 1080</option>
+        <option value="2560x1440">2560 × 1440</option>
+        <option value="3840x2160">3840 × 2160</option>
+        <option value="1080x1080">1080 × 1080</option>
+        <option value="800x600">800 × 600</option>
+      </select>
+      <p class="hint">Picking a size fills in the boxes below. Portrait images flip automatically, so 1920 × 1080 becomes 1080 × 1920.</p>
+    </div>
+
+    <div class="dims">
+      <div class="field">
+        <label for="w">Width</label>
+        <div class="num"><input id="w" type="number" min="1" inputmode="numeric" value="1920"><span>px</span></div>
+      </div>
+      <div class="field">
+        <label for="h">Height</label>
+        <div class="num"><input id="h" type="number" min="1" inputmode="numeric" value="1080"><span>px</span></div>
+      </div>
+    </div>
+
+    <label class="check">
+      <input type="checkbox" id="keep" checked>
+      <span><b>Keep aspect ratio</b><small>Fits each image inside the box without stretching. Leave width or height blank to set just one side.</small></span>
+    </label>
+  </section>
+
+  <section aria-label="Your batch" style="display:flex;flex-direction:column;gap:14px">
+    <div class="batch-head">
+      <h2 id="count">Your batch · 0 images</h2>
+      <button type="button" class="btn-link" id="clear" hidden>Clear all</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="empty" id="empty">No images yet. Add some above.</p>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <button type="button" class="btn-primary" id="go" disabled>Resize and download zip</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </div>
+
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const drop = $('drop'), fileInput = $('file'), grid = $('grid');
+  const presetSel = $('preset'), wIn = $('w'), hIn = $('h'), keep = $('keep');
+  const goBtn = $('go'), statusEl = $('status');
+
+  /** @type {{id:number,file:File,url:string,w:number,h:number,el:HTMLElement}[]} */
+  let items = [];
+  let nextId = 1;
+  const ACCEPT = ['image/jpeg', 'image/png', 'image/webp'];
+
+  // ---------- target size math ----------
+  function readTarget() {
+    const tw = parseInt(wIn.value, 10);
+    const th = parseInt(hIn.value, 10);
+    return { tw: tw > 0 ? tw : null, th: th > 0 ? th : null };
+  }
+
+  // Returns output {w,h} for an image of size w×h, or null if settings are invalid.
+  function computeSize(w, h) {
+    let { tw, th } = readTarget();
+    if (!tw && !th) return null;
+    if (!keep.checked && (!tw || !th)) {
+      // Stretching needs both sides; fill the missing one from the original.
+      tw = tw || w; th = th || h;
+    }
+    // Flip the box to match the image's orientation.
+    if (tw && th) {
+      const boxLandscape = tw > th, imgLandscape = w > h;
+      const boxPortrait = th > tw, imgPortrait = h > w;
+      if ((boxLandscape && imgPortrait) || (boxPortrait && imgLandscape)) [tw, th] = [th, tw];
+    }
+    if (!keep.checked) return { w: tw, h: th };
+    const sx = tw ? tw / w : Infinity;
+    const sy = th ? th / h : Infinity;
+    const s = Math.min(sx, sy);
+    return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+  }
+
+  // ---------- adding / removing ----------
+  function addFiles(list) {
+    const files = [...list].filter(f => ACCEPT.includes(f.type));
+    const skipped = list.length - files.length;
+    files.forEach(file => {
+      const url = URL.createObjectURL(file);
+      const item = { id: nextId++, file, url, w: 0, h: 0, el: null };
+      const fig = document.createElement('figure');
+      fig.innerHTML = `
+        <img alt="">
+        <button type="button" class="remove" aria-label="Remove ${escapeHtml(file.name)}">×</button>
+        <figcaption><span class="name"></span><span class="size mono">Loading…</span></figcaption>`;
+      fig.querySelector('.name').textContent = file.name;
+      fig.querySelector('.name').title = file.name;
+      fig.querySelector('.remove').addEventListener('click', () => removeItem(item.id));
+      const img = fig.querySelector('img');
+      img.onload = () => { item.w = img.naturalWidth; item.h = img.naturalHeight; updateCaption(item); };
+      img.onerror = () => { fig.querySelector('.size').textContent = 'Could not read'; };
+      img.src = url;
+      item.el = fig;
+      items.push(item);
+      grid.appendChild(fig);
+    });
+    refresh();
+    setStatus(skipped ? `Skipped ${skipped} file${skipped > 1 ? 's' : ''} that ${skipped > 1 ? "aren't" : "isn't"} JPG, PNG or WebP.` : '');
+  }
+
+  function removeItem(id) {
+    const i = items.findIndex(x => x.id === id);
+    if (i < 0) return;
+    URL.revokeObjectURL(items[i].url);
+    items[i].el.remove();
+    items.splice(i, 1);
+    refresh();
+  }
+
+  function updateCaption(item) {
+    if (!item.w) return;
+    const out = computeSize(item.w, item.h);
+    item.el.querySelector('.size').textContent =
+      `${item.w}×${item.h} → ` + (out ? `${out.w}×${out.h}` : '?');
+  }
+
+  function refresh() {
+    const n = items.length;
+    $('count').textContent = `Your batch · ${n} image${n === 1 ? '' : 's'}`;
+    $('empty').hidden = n > 0;
+    $('clear').hidden = n === 0;
+    const valid = !!(readTarget().tw || readTarget().th);
+    goBtn.disabled = n === 0 || !valid;
+    goBtn.textContent = n === 1 ? 'Resize and download image' : 'Resize and download zip';
+    items.forEach(updateCaption);
+  }
+
+  // ---------- controls ----------
+  presetSel.addEventListener('change', () => {
+    if (!presetSel.value) return;
+    const [pw, ph] = presetSel.value.split('x');
+    wIn.value = pw; hIn.value = ph;
+    refresh();
+  });
+  [wIn, hIn].forEach(inp => inp.addEventListener('input', () => {
+    const v = `${wIn.value}x${hIn.value}`;
+    presetSel.value = [...presetSel.options].some(o => o.value === v) ? v : '';
+    refresh();
+  }));
+  keep.addEventListener('change', refresh);
+
+  $('browse').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+  $('clear').addEventListener('click', () => {
+    items.forEach(it => URL.revokeObjectURL(it.url));
+    items = []; grid.innerHTML = ''; refresh(); setStatus('');
+  });
+
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+  // Let people drop anywhere on the page without the browser opening the image.
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => { if (!drop.contains(e.target)) { e.preventDefault(); addFiles(e.dataTransfer.files); } });
+
+  // ---------- resizing ----------
+  function loadImage(url) {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = url;
+    });
+  }
+
+  // Step down by halves for big reductions; gives much sharper results than one jump.
+  function resizeToCanvas(img, tw, th) {
+    let src = img, sw = img.naturalWidth, sh = img.naturalHeight;
+    while (sw / 2 >= tw && sh / 2 >= th) {
+      const c = document.createElement('canvas');
+      c.width = Math.round(sw / 2); c.height = Math.round(sh / 2);
+      const cx = c.getContext('2d');
+      cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
+      cx.drawImage(src, 0, 0, c.width, c.height);
+      src = c; sw = c.width; sh = c.height;
+    }
+    const out = document.createElement('canvas');
+    out.width = tw; out.height = th;
+    const ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, tw, th);
+    return out;
+  }
+
+  function canvasToBlob(canvas, type) {
+    return new Promise((res, rej) =>
+      canvas.toBlob(b => b ? res(b) : rej(new Error('encode failed')), type, type === 'image/png' ? undefined : 0.92));
+  }
+
+  function outName(file, w, h, used) {
+    const dot = file.name.lastIndexOf('.');
+    const base = dot > 0 ? file.name.slice(0, dot) : file.name;
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[file.type] || 'jpg';
+    let name = `${base}-${w}x${h}.${ext}`, n = 2;
+    while (used.has(name)) name = `${base}-${w}x${h}-${n++}.${ext}`;
+    used.add(name);
+    return name;
+  }
+
+  goBtn.addEventListener('click', async () => {
+    const single = items.length === 1;
+    if (!single && typeof JSZip === 'undefined') { setStatus('The zip library did not load. Check your connection and reload.', true); return; }
+    goBtn.disabled = true;
+    const used = new Set();
+    const results = [];
+    let done = 0, failed = 0;
+    for (const item of items) {
+      setStatus(single ? 'Resizing…' : `Resizing ${done + 1} of ${items.length}…`);
+      try {
+        const img = await loadImage(item.url);
+        const size = computeSize(img.naturalWidth, img.naturalHeight);
+        const canvas = resizeToCanvas(img, size.w, size.h);
+        const blob = await canvasToBlob(canvas, item.file.type);
+        results.push({ name: outName(item.file, size.w, size.h, used), blob });
+      } catch (e) {
+        failed++;
+      }
+      done++;
+    }
+
+    if (results.length === 0) {
+      setStatus('Could not resize ' + (single ? 'that image.' : 'any of the images.'), true);
+      refresh();
+      return;
+    }
+
+    if (single) {
+      saveBlob(results[0].blob, results[0].name);
+      setStatus(`Done: saved ${results[0].name}`);
+    } else {
+      const zip = new JSZip();
+      results.forEach(r => zip.file(r.name, r.blob));
+      setStatus('Building zip…');
+      const blob = await zip.generateAsync({ type: 'blob' }, m => setStatus(`Building zip… ${Math.round(m.percent)}%`));
+      saveBlob(blob, `resized-images-${new Date().toISOString().slice(0, 10)}.zip`);
+      setStatus(`Done: ${results.length} image${results.length === 1 ? '' : 's'} resized` + (failed ? `, ${failed} failed.` : '.'), failed > 0);
+    }
+    refresh();
+  });
+
+  function saveBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+
+  function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.classList.toggle('err', !!isErr); }
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  refresh();
+})();
+</script>
+</body>
+</html>
